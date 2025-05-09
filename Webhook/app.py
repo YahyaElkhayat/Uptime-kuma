@@ -22,7 +22,7 @@ def trigger_call():
         call_sids.append(call.sid)
 
     # Joining all the Call SIDs to return in response
-    call_sids_str = ', 'join(call_sids)
+    call_sids_str = ', '.join(call_sids)
     return f"Call initiated with SIDs: {call_sids_str}", 200
 
 if __name__ == '__main__':
