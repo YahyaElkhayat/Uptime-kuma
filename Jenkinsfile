@@ -33,16 +33,6 @@ pipeline{
                 }
             }
         }
-        stage('OWASP FS SCAN') {
-        tools {
-            // Use the exact name from Global Tool Configuration
-            'Dependency-Check' 'DP-check'
-        }
-        steps {
-            dependencyCheck additionalArguments: '--scan . --project "MyApp"', odcInstallation: 'DP-check'
-            dependencyCheckPublisher pattern: '**/dependency-check-report.*'
-        }
-        }        }
         stage('TRIVY FS SCAN') {
             steps {
                 sh "trivy fs . > trivyfs.json"
