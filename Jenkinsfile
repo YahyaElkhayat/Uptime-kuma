@@ -1,68 +1,187 @@
-pipeline{
+pipeline {
     agent any
+    
     tools {
         jdk 'jdk17'
         nodejs 'node18'
     }
+    
     environment {
-        SCANNER_HOME=tool 'sonar-scanner'
+        SCANNER_HOME = tool 'sonar-scanner'
+        DOCKER_IMAGE = 'uptime-kuma'
+        DOCKER_TAG = 'latest'
+        CONTAINER_NAME = 'uptime-kuma'
+        APP_PORT = '3001'
     }
+    
     stages {
-        stage ("Git Pull"){
-            steps{
+        stage('Checkout from Git') {
+            steps {
                 git branch: 'main', url: 'https://github.com/YahyaElkhayat/Uptime-kuma.git'
             }
         }
+        
         stage('Install Dependencies') {
             steps {
-                sh "npm install"
+                bat 'npm install'
             }
         }
-        stage("Sonarqube Analysis "){
-            steps{
-                withSonarQubeEnv('sonar-server') {
-                    sh ''' $SCANNER_HOME/bin/sonar-scanner -Dsonar.projectName=yahya-uptime-CICD \
-                    -Dsonar.projectKey=yahya-uptime-CICD '''
+        
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('SonarQube') {
+                    bat '''
+                        %SCANNER_HOME%\\bin\\sonar-scanner.bat ^
+                        -Dsonar.projectName=uptime-kuma ^
+                        -Dsonar.projectKey=uptime-kuma ^
+                        -Dsonar.sources=. ^
+                        -Dsonar.exclusions=node_modules/**,dist/**,build/**
+                    '''
                 }
             }
         }
-        stage('Sonar-quality-gate') {
+        
+        stage('Quality Gate') {
             steps {
-                script{
-                    waitForQualityGate abortPipeline: false, credentialsId: 'Sonar-token'
-                }
-            }
-        }
-        stage('TRIVY FS SCAN') {
-            steps {
-                sh "trivy fs . > trivyfs.json"
-            }
-        }
-        stage("Docker Build & Push"){
-            steps{
-                script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){   
-                       sh "docker build -t uptime ."
-                       sh "docker tag uptime yahyaelkhayat/uptime:latest "
-                       sh "docker push yahyaelkhayat/uptime:latest "
+                script {
+                    timeout(time: 10, unit: 'MINUTES') {
+                        waitForQualityGate abortPipeline: false, credentialsId: 'sonarqube-token'
                     }
                 }
             }
         }
-        stage("TRIVY"){
-            steps{
-                sh "trivy image yahyaelkhayat/uptime:latest > trivy.json" 
+        
+        stage('OWASP Dependency Check') {
+            steps {
+                dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit --format HTML --format XML', 
+                                odcInstallation: 'OWASP-DC'
+                dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
-        stage ("Remove container") {
-            steps{
-                sh "docker stop uptime | true"
-                sh "docker rm uptime | true"
-             }
+        
+        stage('Docker Security Scan') {
+            steps {
+                script {
+                    try {
+                        bat 'docker scout quickview || echo "Docker Scout not available, skipping..."'
+                    } catch (Exception e) {
+                        echo "Docker Scout scan failed or not available: ${e.getMessage()}"
+                    }
+                }
+            }
         }
-        stage('Deploy to container'){
-            steps{
-                sh 'docker run -d --name uptime -v /var/run/docker.sock:/var/run/docker.sock -p 3001:3001 yahyaelkhayat/uptime:latest'
+        
+        stage('Docker Build') {
+            steps {
+                script {
+                    bat "docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% ."
+                }
+            }
+        }
+        
+        stage('Docker Image Vulnerability Scan') {
+            steps {
+                script {
+                    try {
+                        bat "docker scout cves %DOCKER_IMAGE%:%DOCKER_TAG% || echo \"Docker Scout CVE scan completed\""
+                    } catch (Exception e) {
+                        echo "Docker vulnerability scan completed with warnings: ${e.getMessage()}"
+                    }
+                }
+            }
+        }
+        
+        stage('Docker Push') {
+            when {
+                expression { 
+                    return params.PUSH_TO_REGISTRY == true 
+                }
+            }
+            steps {
+                script {
+                    withDockerRegistry(credentialsId: 'docker-hub', toolName: 'docker') {
+                        bat '''
+                            docker tag %DOCKER_IMAGE%:%DOCKER_TAG% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%
+                            docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%
+                        '''
+                    }
+                }
+            }
+        }
+        
+        stage('Clean Up Existing Container') {
+            steps {
+                script {
+                    bat '''
+                        docker stop %CONTAINER_NAME% 2>nul || echo "Container not running"
+                        docker rm %CONTAINER_NAME% 2>nul || echo "Container not found"
+                    '''
+                }
+            }
+        }
+        
+        stage('Deploy to Container') {
+            steps {
+                script {
+                    bat '''
+                        docker run -d ^
+                        --name %CONTAINER_NAME% ^
+                        -p %APP_PORT%:%APP_PORT% ^
+                        -v uptime-kuma-data:/app/data ^
+                        --restart unless-stopped ^
+                        %DOCKER_IMAGE%:%DOCKER_TAG%
+                    '''
+                }
+            }
+        }
+        
+        stage('Health Check') {
+            steps {
+                script {
+                    sleep(time: 30, unit: 'SECONDS')
+                    timeout(time: 5, unit: 'MINUTES') {
+                        waitUntil {
+                            script {
+                                try {
+                                    def response = bat(script: 'curl -f http://localhost:%APP_PORT% || exit 1', returnStatus: true)
+                                    return response == 0
+                                } catch (Exception e) {
+                                    echo "Health check attempt failed: ${e.getMessage()}"
+                                    return false
+                                }
+                            }
+                        }
+                    }
+                    echo "✅ Uptime Kuma is running successfully at http://localhost:${APP_PORT}"
+                }
+            }
+        }
+    }
+    
+    post {
+        always {
+            script {
+                // Archive reports
+                archiveArtifacts artifacts: '**/dependency-check-report.*', allowEmptyArchive: true
+                
+                // Clean up workspace
+                cleanWs()
+            }
+        }
+        
+        success {
+            echo "🎉 Pipeline completed successfully!"
+            echo "Uptime Kuma is available at: http://localhost:${APP_PORT}"
+        }
+        
+        failure {
+            echo "❌ Pipeline failed. Check the logs for details."
+            script {
+                // Stop and remove container if deployment failed
+                bat '''
+                    docker stop %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
+                    docker rm %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
+                '''
             }
         }
     }
