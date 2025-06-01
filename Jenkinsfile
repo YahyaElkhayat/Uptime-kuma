@@ -42,16 +42,11 @@ pipeline {
             }
         }
         
-        stage('SonarQube Analysis') {
-            steps {
-                withSonarQubeEnv('SonarQube') {
-                    bat '''
-                        %SCANNER_HOME%\\bin\\sonar-scanner.bat ^
-                        -Dsonar.projectName=uptime-kuma ^
-                        -Dsonar.projectKey=uptime-kuma ^
-                        -Dsonar.sources=. ^
-                        -Dsonar.exclusions=node_modules/**,dist/**,build/**
-                    '''
+        stage("Sonarqube Analysis "){
+            steps{
+                withSonarQubeEnv('sonar-server') {
+                    bat ''' %SCANNER_HOME%\\bin\\sonar-scanner.bat -Dsonar.projectName=yahya-uptime-CICD ^
+                    -Dsonar.projectKey=yahya-uptime-CICD '''
                 }
             }
         }
