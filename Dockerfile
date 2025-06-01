@@ -4,6 +4,17 @@ FROM node:18
 # Set the working directory in the container
 WORKDIR /app
 
+# Accept build arguments for npm configuration
+ARG NPM_CONFIG_REGISTRY
+ARG NPM_CONFIG_TIMEOUT
+ARG NPM_CONFIG_FETCH_TIMEOUT
+ARG NPM_CONFIG_FETCH_RETRIES
+
+# Set npm configuration
+RUN npm config set registry ${NPM_CONFIG_REGISTRY:-https://registry.npmjs.org/} && \
+    npm config set timeout ${NPM_CONFIG_TIMEOUT:-300000} && \
+    npm config set fetch-timeout ${NPM_CONFIG_FETCH_TIMEOUT:-300000} && \
+    npm config set fetch-retries ${NPM_CONFIG_FETCH_RETRIES:-5}
 # Copy the current directory contents into the container at /app
 COPY . .
 
