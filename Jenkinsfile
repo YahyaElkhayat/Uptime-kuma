@@ -72,7 +72,7 @@ pipeline {
         stage("Docker Build & Push"){
             steps{
                 script{
-                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
+                   withDockerRegistry(credentialsId: 'docker'){
                           bat "docker build -t %DOCKER_IMAGE% ."
                        bat "docker tag %DOCKER_IMAGE% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
                        bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
