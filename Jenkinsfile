@@ -8,9 +8,9 @@ pipeline {
     
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = 'uptime-kuma'
+        DOCKER_IMAGE = 'uptime'
         DOCKER_TAG = 'latest'
-        CONTAINER_NAME = 'uptime-kuma'
+        CONTAINER_NAME = 'uptime'
         APP_PORT = '3001'
     }
     
@@ -64,106 +64,49 @@ pipeline {
         stage('OWASP Dependency Check') {
             steps {
                 dependencyCheck additionalArguments: '--scan ./ --disableYarnAudit --disableNodeAudit --format HTML --format XML', 
-                                odcInstallation: 'DP-Check'
+                                odcInstallation: 'DP-Chekk'
                 dependencyCheckPublisher pattern: '**/dependency-check-report.xml'
             }
         }
         
-        stage('Docker Security Scan') {
+        stage('TRIVY FS SCAN') {
             steps {
-                script {
-                    try {
-                        bat 'docker scout quickview || echo "Docker Scout not available, skipping..."'
-                    } catch (Exception e) {
-                        echo "Docker Scout scan failed or not available: ${e.getMessage()}"
+                bat "trivy fs . > trivyfs.json"
+            }
+        }
+        
+        stage("Docker Build & Push"){
+            steps{
+                script{
+                   withDockerRegistry(credentialsId: 'docker', toolName: 'docker'){
+                          bat "docker build -t %DOCKER_IMAGE% ."
+                       bat "docker tag %DOCKER_IMAGE% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
+                       bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
                     }
                 }
             }
         }
         
-        stage('Docker Build') {
-            steps {
-                script {
-                    bat "docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% ."
-                }
+        stage("TRIVY"){
+            steps{
+                bat "trivy image yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG% > trivy.json"
             }
         }
         
-        stage('Docker Image Vulnerability Scan') {
-            steps {
-                script {
-                    try {
-                        bat "docker scout cves %DOCKER_IMAGE%:%DOCKER_TAG% || echo \"Docker Scout CVE scan completed\""
-                    } catch (Exception e) {
-                        echo "Docker vulnerability scan completed with warnings: ${e.getMessage()}"
-                    }
-                }
-            }
-        }
-        
-        stage('Docker Push') {
-            when {
-                expression { 
-                    return params.PUSH_TO_REGISTRY == true 
-                }
-            }
-            steps {
-                script {
-                    withDockerRegistry(credentialsId: 'docker-hub', toolName: 'docker') {
-                        bat '''
-                            docker tag %DOCKER_IMAGE%:%DOCKER_TAG% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%
-                            docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%
-                        '''
-                    }
-                }
-            }
-        }
-        
-        stage('Clean Up Existing Container') {
-            steps {
+        stage ("Remove container") {
+            steps{
                 script {
                     bat '''
-                        docker stop %CONTAINER_NAME% 2>nul || echo "Container not running"
-                        docker rm %CONTAINER_NAME% 2>nul || echo "Container not found"
+                        docker stop %CONTAINER_NAME% 2>nul & exit /b 0
+                        docker rm %CONTAINER_NAME% 2>nul & exit /b 0
                     '''
                 }
             }
         }
         
-        stage('Deploy to Container') {
-            steps {
-                script {
-                    bat '''
-                        docker run -d ^
-                        --name %CONTAINER_NAME% ^
-                        -p %APP_PORT%:%APP_PORT% ^
-                        -v uptime-kuma-data:/app/data ^
-                        --restart unless-stopped ^
-                        %DOCKER_IMAGE%:%DOCKER_TAG%
-                    '''
-                }
-            }
-        }
-        
-        stage('Health Check') {
-            steps {
-                script {
-                    sleep(time: 30, unit: 'SECONDS')
-                    timeout(time: 5, unit: 'MINUTES') {
-                        waitUntil {
-                            script {
-                                try {
-                                    def response = bat(script: 'curl -f http://localhost:%APP_PORT% || exit 1', returnStatus: true)
-                                    return response == 0
-                                } catch (Exception e) {
-                                    echo "Health check attempt failed: ${e.getMessage()}"
-                                    return false
-                                }
-                            }
-                        }
-                    }
-                    echo "✅ Uptime Kuma is running successfully at http://localhost:${APP_PORT}"
-                }
+        stage('Deploy to container'){
+            steps{
+                bat 'docker run -d --name %CONTAINER_NAME% -p %APP_PORT%:%APP_PORT% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%'
             }
         }
     }
@@ -174,6 +117,8 @@ pipeline {
                 // Archive reports
                 try {
                     archiveArtifacts artifacts: '**/dependency-check-report.*', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '**/trivyfs.json', allowEmptyArchive: true
+                    archiveArtifacts artifacts: '**/trivy.json', allowEmptyArchive: true
                 } catch (Exception e) {
                     echo "No artifacts to archive: ${e.getMessage()}"
                 }
@@ -198,8 +143,8 @@ pipeline {
                 try {
                     // Stop and remove container if deployment failed
                     bat '''
-                        docker stop %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
-                        docker rm %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
+                        docker stop %CONTAINER_NAME% 2>nul & exit /b 0
+                        docker rm %CONTAINER_NAME% 2>nul & exit /b 0
                     '''
                 } catch (Exception e) {
                     echo "Container cleanup completed: ${e.getMessage()}"
