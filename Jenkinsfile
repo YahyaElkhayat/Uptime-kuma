@@ -23,7 +23,22 @@ pipeline {
         
         stage('Install Dependencies') {
             steps {
-                bat 'npm install'
+                script {
+                    // Configure npm for better network handling
+                    bat '''
+                        npm config set registry https://registry.npmjs.org/
+                        npm config set timeout 300000
+                        npm config set fetch-timeout 300000 
+                        npm config set fetch-retry-mintimeout 20000
+                        npm config set fetch-retry-maxtimeout 120000
+                        npm config set fetch-retries 5
+                    '''
+                    
+                    // Try npm install with retry logic
+                    retry(3) {
+                        bat 'npm install --verbose --no-optional'
+                    }
+                }
             }
         }
         
@@ -162,10 +177,18 @@ pipeline {
         always {
             script {
                 // Archive reports
-                archiveArtifacts artifacts: '**/dependency-check-report.*', allowEmptyArchive: true
+                try {
+                    archiveArtifacts artifacts: '**/dependency-check-report.*', allowEmptyArchive: true
+                } catch (Exception e) {
+                    echo "No artifacts to archive: ${e.getMessage()}"
+                }
                 
                 // Clean up workspace
-                cleanWs()
+                try {
+                    cleanWs()
+                } catch (Exception e) {
+                    echo "Workspace cleanup warning: ${e.getMessage()}"
+                }
             }
         }
         
@@ -177,11 +200,15 @@ pipeline {
         failure {
             echo "❌ Pipeline failed. Check the logs for details."
             script {
-                // Stop and remove container if deployment failed
-                bat '''
-                    docker stop %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
-                    docker rm %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
-                '''
+                try {
+                    // Stop and remove container if deployment failed
+                    bat '''
+                        docker stop %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
+                        docker rm %CONTAINER_NAME% 2>nul || echo "Container cleanup not needed"
+                    '''
+                } catch (Exception e) {
+                    echo "Container cleanup completed: ${e.getMessage()}"
+                }
             }
         }
     }
