@@ -72,11 +72,15 @@ pipeline {
         stage("Docker Build & Push"){
             steps{
                 script{
-                   withDockerRegistry(credentialsId: 'docker'){
-                          bat "docker build -t %DOCKER_IMAGE% ."
-                       bat "docker tag %DOCKER_IMAGE% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
-                       bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
+                    // Login to Docker Hub
+                    withCredentials([usernamePassword(credentialsId: 'docker', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                        bat 'docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%'
                     }
+                    
+                    // Build and push
+                    bat "docker build -t %DOCKER_IMAGE% ."
+                    bat "docker tag %DOCKER_IMAGE% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
+                    bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
                 }
             }
         }
