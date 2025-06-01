@@ -69,12 +69,6 @@ pipeline {
             }
         }
         
-        stage('TRIVY FS SCAN') {
-            steps {
-                bat "trivy fs . > trivyfs.json"
-            }
-        }
-        
         stage("Docker Build & Push"){
             steps{
                 script{
@@ -84,12 +78,6 @@ pipeline {
                        bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
                     }
                 }
-            }
-        }
-        
-        stage("TRIVY"){
-            steps{
-                bat "trivy image yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG% > trivy.json"
             }
         }
         
@@ -117,8 +105,6 @@ pipeline {
                 // Archive reports
                 try {
                     archiveArtifacts artifacts: '**/dependency-check-report.*', allowEmptyArchive: true
-                    archiveArtifacts artifacts: '**/trivyfs.json', allowEmptyArchive: true
-                    archiveArtifacts artifacts: '**/trivy.json', allowEmptyArchive: true
                 } catch (Exception e) {
                     echo "No artifacts to archive: ${e.getMessage()}"
                 }
