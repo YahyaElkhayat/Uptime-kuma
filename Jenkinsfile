@@ -8,9 +8,9 @@ pipeline {
     
     environment {
         SCANNER_HOME = tool 'sonar-scanner'
-        DOCKER_IMAGE = 'uptime'
+        DOCKER_IMAGE = 'uptime-kuma'
         DOCKER_TAG = 'latest'
-        CONTAINER_NAME = 'uptime'
+        CONTAINER_NAME = 'uptime-kuma'
         APP_PORT = '3001'
     }
     
@@ -69,25 +69,22 @@ pipeline {
             }
         }
         
-        stage("Docker Build & Push"){
+        stage("Docker Build"){
             steps{
                 script{
-                    // Login to Docker Hub
-                    withCredentials([usernamePassword(credentialsId: 'docker', passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
-                        bat 'docker login -u %DOCKER_USERNAME% -p %DOCKER_PASSWORD%'
-                    }
+                    echo "Building Docker image locally..."
+                    bat "docker build -t %DOCKER_IMAGE%:%DOCKER_TAG% ."
                     
-                    // Build and push
-                    bat "docker build -t %DOCKER_IMAGE% ."
-                    bat "docker tag %DOCKER_IMAGE% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
-                    bat "docker push yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%"
+                    // List the built image
+                    bat "docker images %DOCKER_IMAGE%"
                 }
             }
         }
         
-        stage ("Remove container") {
+        stage ("Stop & Remove Existing Container") {
             steps{
                 script {
+                    echo "Stopping and removing existing container if it exists..."
                     bat '''
                         docker stop %CONTAINER_NAME% 2>nul & exit /b 0
                         docker rm %CONTAINER_NAME% 2>nul & exit /b 0
@@ -96,9 +93,18 @@ pipeline {
             }
         }
         
-        stage('Deploy to container'){
+        stage('Deploy to Local Container'){
             steps{
-                bat 'docker run -d --name %CONTAINER_NAME% -p %APP_PORT%:%APP_PORT% yahyaelkhayat/%DOCKER_IMAGE%:%DOCKER_TAG%'
+                script {
+                    echo "Starting Uptime Kuma container locally..."
+                    bat 'docker run -d --name %CONTAINER_NAME% -p %APP_PORT%:%APP_PORT% %DOCKER_IMAGE%:%DOCKER_TAG%'
+                    
+                    // Wait a moment for container to start
+                    sleep(time: 5, unit: 'SECONDS')
+                    
+                    // Check if container is running
+                    bat 'docker ps | findstr %CONTAINER_NAME%'
+                }
             }
         }
     }
@@ -124,7 +130,11 @@ pipeline {
         
         success {
             echo "🎉 Pipeline completed successfully!"
-            echo "Uptime Kuma is available at: http://localhost:${APP_PORT}"
+            echo "Uptime Kuma is now running locally!"
+            echo "Access it at: http://localhost:${APP_PORT}"
+            echo "Container name: ${CONTAINER_NAME}"
+            echo "To stop the container: docker stop ${CONTAINER_NAME}"
+            echo "To view logs: docker logs ${CONTAINER_NAME}"
         }
         
         failure {
